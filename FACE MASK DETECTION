@@ -1,0 +1,321 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "gpuType": "T4",
+      "authorship_tag": "ABX9TyOnOzUSffDfqzOtZDfOvQ4R",
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    },
+    "accelerator": "GPU"
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/jameelarham220-cell/face-mask-detection-cnn/blob/main/FACE%20MASK%20DETECTION\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "\n",
+        "import os\n",
+        "import cv2\n",
+        "import numpy as np\n",
+        "import xml.etree.ElementTree as ET\n",
+        "import kagglehub\n",
+        "\n",
+        "from sklearn.model_selection import train_test_split\n",
+        "\n",
+        "from tensorflow.keras.models import Sequential\n",
+        "from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout\n",
+        "from tensorflow.keras.utils import to_categorical\n",
+        "\n",
+        "\n",
+        "# Download dataset\n",
+        "print(\"Downloading dataset from Kaggle...\")\n",
+        "dataset_path = kagglehub.dataset_download(\"andrewmvd/face-mask-detection\")\n",
+        "\n",
+        "image_dir = os.path.join(dataset_path, \"images\")\n",
+        "annot_dir = os.path.join(dataset_path, \"annotations\")\n",
+        "\n",
+        "\n",
+        "# Class labels\n",
+        "label_map = {\n",
+        "    \"with_mask\": 0,\n",
+        "    \"without_mask\": 1,\n",
+        "    \"mask_weared_incorrect\": 2\n",
+        "}\n",
+        "\n",
+        "data = []\n",
+        "labels = []\n",
+        "\n",
+        "print(\"Preprocessing images and annotations...\")\n",
+        "\n",
+        "for xml_file in sorted(os.listdir(annot_dir)):\n",
+        "    xml_path = os.path.join(annot_dir, xml_file)\n",
+        "\n",
+        "    try:\n",
+        "        tree = ET.parse(xml_path)\n",
+        "        root = tree.getroot()\n",
+        "\n",
+        "        img_name = root.find(\"filename\").text\n",
+        "        img_path = os.path.join(image_dir, img_name)\n",
+        "\n",
+        "        img = cv2.imread(img_path)\n",
+        "\n",
+        "        if img is None:\n",
+        "            continue\n",
+        "\n",
+        "        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)\n",
+        "\n",
+        "        for obj in root.findall(\"object\"):\n",
+        "            label_text = obj.find(\"name\").text\n",
+        "\n",
+        "            if label_text not in label_map:\n",
+        "                continue\n",
+        "\n",
+        "            label = label_map[label_text]\n",
+        "\n",
+        "            box = obj.find(\"bndbox\")\n",
+        "\n",
+        "            xmin = int(box.find(\"xmin\").text)\n",
+        "            ymin = int(box.find(\"ymin\").text)\n",
+        "            xmax = int(box.find(\"xmax\").text)\n",
+        "            ymax = int(box.find(\"ymax\").text)\n",
+        "\n",
+        "            face = img[ymin:ymax, xmin:xmax]\n",
+        "\n",
+        "            if face.size == 0:\n",
+        "                continue\n",
+        "\n",
+        "            face = cv2.resize(face, (64, 64))\n",
+        "            face = face / 255.0\n",
+        "\n",
+        "            data.append(face)\n",
+        "            labels.append(label)\n",
+        "\n",
+        "    except Exception as e:\n",
+        "        print(f\"Skipping {xml_file}: {e}\")\n",
+        "\n",
+        "\n",
+        "# Convert data to NumPy arrays\n",
+        "X = np.array(data)\n",
+        "y = np.array(labels)\n",
+        "\n",
+        "print(f\"Total faces processed: {len(X)}\")\n",
+        "print(f\"Dataset shape: {X.shape}\")\n",
+        "\n",
+        "\n",
+        "# Split data into training, validation, and test sets\n",
+        "X_train, X_temp, y_train, y_temp = train_test_split(\n",
+        "    X,\n",
+        "    y,\n",
+        "    test_size=0.2,\n",
+        "    random_state=42,\n",
+        "    stratify=y\n",
+        ")\n",
+        "\n",
+        "X_val, X_test, y_val, y_test = train_test_split(\n",
+        "    X_temp,\n",
+        "    y_temp,\n",
+        "    test_size=0.5,\n",
+        "    random_state=42,\n",
+        "    stratify=y_temp\n",
+        ")\n",
+        "\n",
+        "\n",
+        "# Convert labels to one-hot encoding\n",
+        "y_train = to_categorical(y_train, num_classes=3)\n",
+        "y_val = to_categorical(y_val, num_classes=3)\n",
+        "y_test = to_categorical(y_test, num_classes=3)\n",
+        "\n",
+        "\n",
+        "print(f\"Training samples: {len(X_train)}\")\n",
+        "print(f\"Validation samples: {len(X_val)}\")\n",
+        "print(f\"Test samples: {len(X_test)}\")\n",
+        "\n",
+        "\n",
+        "# Build CNN model\n",
+        "model = Sequential([\n",
+        "    Conv2D(32, (3, 3), activation=\"relu\", input_shape=(64, 64, 3)),\n",
+        "    MaxPooling2D(2, 2),\n",
+        "\n",
+        "    Conv2D(64, (3, 3), activation=\"relu\"),\n",
+        "    MaxPooling2D(2, 2),\n",
+        "\n",
+        "    Conv2D(128, (3, 3), activation=\"relu\"),\n",
+        "    MaxPooling2D(2, 2),\n",
+        "\n",
+        "    Flatten(),\n",
+        "\n",
+        "    Dense(128, activation=\"relu\"),\n",
+        "    Dropout(0.5),\n",
+        "\n",
+        "    Dense(3, activation=\"softmax\")\n",
+        "])\n",
+        "\n",
+        "\n",
+        "# Compile model\n",
+        "model.compile(\n",
+        "    optimizer=\"adam\",\n",
+        "    loss=\"categorical_crossentropy\",\n",
+        "    metrics=[\"accuracy\"]\n",
+        ")\n",
+        "\n",
+        "\n",
+        "# Train model\n",
+        "print(\"Starting training...\")\n",
+        "\n",
+        "history = model.fit(\n",
+        "    X_train,\n",
+        "    y_train,\n",
+        "    epochs=20,\n",
+        "    batch_size=32,\n",
+        "    validation_data=(X_val, y_val)\n",
+        ")\n",
+        "\n",
+        "\n",
+        "# Evaluate model on test data\n",
+        "loss, accuracy = model.evaluate(X_test, y_test)\n",
+        "\n",
+        "print(f\"Test Accuracy: {accuracy * 100:.2f}%\")\n",
+        "\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "jnCh7OBLDuPM",
+        "outputId": "c3c6905d-b895-4df8-d8db-7f9513bc02a5"
+      },
+      "execution_count": 7,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Downloading dataset from Kaggle...\n",
+            "Using Colab cache for faster access to the 'face-mask-detection' dataset.\n",
+            "Preprocessing images and annotations...\n",
+            "Total faces processed: 4072\n",
+            "Dataset shape: (4072, 64, 64, 3)\n",
+            "Training samples: 3257\n",
+            "Validation samples: 407\n",
+            "Test samples: 408\n"
+          ]
+        },
+        {
+          "output_type": "stream",
+          "name": "stderr",
+          "text": [
+            "/usr/local/lib/python3.13/dist-packages/keras/src/layers/convolutional/base_conv.py:113: UserWarning: Do not pass an `input_shape`/`input_dim` argument to a layer. When using Sequential models, prefer using an `Input(shape)` object as the first layer in the model instead.\n",
+            "  super().__init__(activity_regularizer=activity_regularizer, **kwargs)\n"
+          ]
+        },
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Starting training...\n",
+            "Epoch 1/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m10s\u001b[0m 43ms/step - accuracy: 0.8714 - loss: 0.3730 - val_accuracy: 0.9189 - val_loss: 0.2586\n",
+            "Epoch 2/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9297 - loss: 0.2387 - val_accuracy: 0.9386 - val_loss: 0.2093\n",
+            "Epoch 3/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9346 - loss: 0.2270 - val_accuracy: 0.9435 - val_loss: 0.1928\n",
+            "Epoch 4/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9398 - loss: 0.1961 - val_accuracy: 0.9459 - val_loss: 0.1983\n",
+            "Epoch 5/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9395 - loss: 0.1917 - val_accuracy: 0.9484 - val_loss: 0.1978\n",
+            "Epoch 6/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 10ms/step - accuracy: 0.9380 - loss: 0.1894 - val_accuracy: 0.9263 - val_loss: 0.2198\n",
+            "Epoch 7/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9377 - loss: 0.1848 - val_accuracy: 0.9558 - val_loss: 0.1763\n",
+            "Epoch 8/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 12ms/step - accuracy: 0.9426 - loss: 0.1827 - val_accuracy: 0.9459 - val_loss: 0.1875\n",
+            "Epoch 9/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 10ms/step - accuracy: 0.9407 - loss: 0.1723 - val_accuracy: 0.9533 - val_loss: 0.1788\n",
+            "Epoch 10/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 8ms/step - accuracy: 0.9435 - loss: 0.1681 - val_accuracy: 0.9459 - val_loss: 0.1553\n",
+            "Epoch 11/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9493 - loss: 0.1540 - val_accuracy: 0.9459 - val_loss: 0.1625\n",
+            "Epoch 12/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9509 - loss: 0.1443 - val_accuracy: 0.9533 - val_loss: 0.1500\n",
+            "Epoch 13/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9533 - loss: 0.1468 - val_accuracy: 0.9410 - val_loss: 0.1713\n",
+            "Epoch 14/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9506 - loss: 0.1391 - val_accuracy: 0.9509 - val_loss: 0.1656\n",
+            "Epoch 15/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9579 - loss: 0.1225 - val_accuracy: 0.9533 - val_loss: 0.1701\n",
+            "Epoch 16/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9561 - loss: 0.1201 - val_accuracy: 0.9484 - val_loss: 0.1713\n",
+            "Epoch 17/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9610 - loss: 0.1115 - val_accuracy: 0.9582 - val_loss: 0.1612\n",
+            "Epoch 18/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9595 - loss: 0.1149 - val_accuracy: 0.9509 - val_loss: 0.1562\n",
+            "Epoch 19/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9625 - loss: 0.1154 - val_accuracy: 0.9484 - val_loss: 0.1535\n",
+            "Epoch 20/20\n",
+            "\u001b[1m102/102\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 7ms/step - accuracy: 0.9635 - loss: 0.1038 - val_accuracy: 0.9337 - val_loss: 0.1848\n",
+            "\u001b[1m13/13\u001b[0m \u001b[32m━━━━━━━━━━━━━━━━━━━━\u001b[0m\u001b[37m\u001b[0m \u001b[1m1s\u001b[0m 49ms/step - accuracy: 0.9461 - loss: 0.1594\n",
+            "Test Accuracy: 94.61%\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [],
+      "metadata": {
+        "id": "vmF52MoCKQwM"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "model.save('my_mask_model.keras')\n",
+        "print(\"Model saved to your Colab files!\")"
+      ],
+      "metadata": {
+        "id": "KXwQ7kkeKU56",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "6213a525-2b67-44ba-d794-7092e9c692c8"
+      },
+      "execution_count": 8,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Model saved to your Colab files!\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 8,
+      "metadata": {
+        "id": "PAJNdjnfDITy"
+      },
+      "outputs": [],
+      "source": []
+    }
+  ]
+}
